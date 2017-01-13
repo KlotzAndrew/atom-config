@@ -1,0 +1,28 @@
+"*":
+  core:
+    disabledPackages: [
+      "linter-ruby-reek"
+      "about"
+      "welcome"
+      "linter-rubocop"
+    ]
+    themes: [
+      "one-dark-ui"
+      "solarized-dark-syntax"
+    ]
+  editor:
+    fontSize: 12
+    showIndentGuide: true
+    showInvisibles: true
+  "exception-reporting":
+    userId: "9a418efc-cf69-5e15-d7f7-fa5984c6bef2"
+  "git-diff": {}
+  "linter-elixir-credo":
+    flags: "--strict"
+  "linter-rubocop":
+    command: "/Users/andrew.klotz/.rvm/gems/ruby-2.3.0/bin/rubocop"
+  "linter-ruby-reek":
+    executablePath: "/Users/andrew.klotz/.rvm/gems/ruby-2.3.0/bin/reek"
+  tabs:
+    addNewTabsAtEnd: true
+    enableVcsColoring: true

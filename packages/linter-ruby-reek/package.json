@@ -1,0 +1,67 @@
+{
+  "_args": [
+    [
+      {
+        "raw": "/private/var/folders/s_/91fyw6797613zq2b5rv3y1sd5945vv/T/d-1161127-59443-1pvao8j/package.tgz",
+        "scope": null,
+        "escapedName": null,
+        "name": null,
+        "rawSpec": "/private/var/folders/s_/91fyw6797613zq2b5rv3y1sd5945vv/T/d-1161127-59443-1pvao8j/package.tgz",
+        "spec": "/private/var/folders/s_/91fyw6797613zq2b5rv3y1sd5945vv/T/d-1161127-59443-1pvao8j/package.tgz",
+        "type": "local"
+      },
+      "/private/var/folders/s_/91fyw6797613zq2b5rv3y1sd5945vv/T/apm-install-dir-1161127-59443-xvgez3"
+    ]
+  ],
+  "_from": "../d-1161127-59443-1pvao8j/package.tgz",
+  "_id": "linter-ruby-reek@1.5.1",
+  "_inCache": true,
+  "_installable": true,
+  "_location": "/linter-ruby-reek",
+  "_phantomChildren": {},
+  "_requested": {
+    "raw": "/private/var/folders/s_/91fyw6797613zq2b5rv3y1sd5945vv/T/d-1161127-59443-1pvao8j/package.tgz",
+    "scope": null,
+    "escapedName": null,
+    "name": null,
+    "rawSpec": "/private/var/folders/s_/91fyw6797613zq2b5rv3y1sd5945vv/T/d-1161127-59443-1pvao8j/package.tgz",
+    "spec": "/private/var/folders/s_/91fyw6797613zq2b5rv3y1sd5945vv/T/d-1161127-59443-1pvao8j/package.tgz",
+    "type": "local"
+  },
+  "_requiredBy": [
+    "#USER"
+  ],
+  "_resolved": "file:../d-1161127-59443-1pvao8j/package.tgz",
+  "_shasum": "d4aa30846cb554f217637109f53edef03ec7fc84",
+  "_shrinkwrap": null,
+  "_spec": "/private/var/folders/s_/91fyw6797613zq2b5rv3y1sd5945vv/T/d-1161127-59443-1pvao8j/package.tgz",
+  "_where": "/private/var/folders/s_/91fyw6797613zq2b5rv3y1sd5945vv/T/apm-install-dir-1161127-59443-xvgez3",
+  "bugs": {
+    "url": "https://github.com/ahmadseleem/linter-ruby-reek/issues"
+  },
+  "dependencies": {},
+  "description": "We use *Reek*: a tool that examines Ruby classes, modules and methods. Reports any code SMELLS it detects..",
+  "devDependencies": {},
+  "engines": {
+    "atom": ">=0.174.0 <2.0.0"
+  },
+  "homepage": "https://github.com/ahmadseleem/linter-ruby-reek",
+  "license": "MIT",
+  "main": "./lib/linter-ruby-reek",
+  "name": "linter-ruby-reek",
+  "optionalDependencies": {},
+  "providedServices": {
+    "linter": {
+      "versions": {
+        "1.0.0": "provideLinter"
+      }
+    }
+  },
+  "readme": "Linter-Ruby-Reek = LRR\n=========================\n\n## LRR: A neat Linter for Ruby files.\n\nUsing *Reek* Ruby gem: a tool that examines Ruby classes, modules and methods.\n\n∑ ∑ Reports any code SMELLS it detects. ∑ ∑\n\nWe use The interface of the beautifull [Linter](https://github.com/AtomLinter/Linter)\nto prived the neet features of [Reek](https://github.com/troessner/reek).\n\n## Installation\n### dependencies:\n1 - Linter package.\n  To install Linter: [Linter](https://github.com/AtomLinter/Linter).\n\n2 - Reek gem.\n  Make ensure that `reek` is installed on your system.\n\n  == To install `reek`, do the following:\n   ```\n   gem install reek\n   ```\n\n### Executable Path\n\nAdd reek path:\n- Up here in the **settings panel**\n\n**or**\n\n- here:\n**~/.atom/config.cson** (choose Open Your Config in Atom menu).\n\n```\n\"linter-ruby-reek\":\n  executablePath: \"/path/to/your/reek/here\"\n```\n- Run **`which reek`** to find the path **or** run **`rbenv which reek`** for rbenv users.\n- If you don't, **`reek`** will be the default settings.\n\n### Reek Configuration Path\n\nAdd reek configuration path (if it's not default config.reek):\n- Up here in the **settings panel**\n\n**or**\n\n- here:\n**~/.atom/config.cson** (choose Open Your Config in Atom menu).\n\n```\n\"linter-ruby-reek\":\n  configPath: \"test.reek\"\n```\n\n**NOTE - 1**:\n- Open atom from the terminal if you don't see the linter working, it's Atom\n  doesn't see the path sometimes unless opened from the terminal.\n  **I'm working to find the best way to avoid this issues**\n  **BUT**, maybe you should add the Path in **~/.atom/config.cson** in that order:\n  1. \"linter-ruby\":\n  2. \"linter-reek\":\n  3. linter:\n  I have to test that and see...\n\n**NOTE - 2**:\n- Please, note that reek only provides line numbers for errors, for now. So, columns are set\nto 1 as default.\n\n\n### Enjoy it! ;)\n\nThank you!\n@ahmadSeleem\n",
+  "readmeFilename": "README.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahmadseleem/linter-ruby-reek.git"
+  },
+  "version": "1.5.1"
+}

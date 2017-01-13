@@ -1,0 +1,831 @@
+import _ from 'lodash';
+import Uuid from 'lodash-uuid';
+import alt from 'alt/alt';
+
+import { OVER_DOCUMENT_INDEX, MAX_DRAFT_DOCUMENT_HEIGHT, DropTargetLocations, ObjectTypes } from 'DocumentEditor/constants';
+import { rowElementTypes, applyToLocations } from 'common/constants';
+
+import GenerateUuidHelper from 'alt/lib/GenerateUuidHelper';
+import CustomStylesheetGenerator from 'alt/lib/CustomStylesheetGenerator';
+import AssignParentCheckboxUuidHelper from 'alt/lib/AssignParentCheckboxUuidHelper';
+
+import DraftDocumentActions from '../actions/DraftDocumentActions';
+import BaseComponentStore from './BaseComponentStore';
+import OverElementStore from './OverElementStore';
+import PaginateStore from './PaginateStore';
+import OrganizationSettingStore from './OrganizationSettingStore';
+
+
+class DraftDocumentStore extends BaseComponentStore {
+  constructor() {
+    super();
+    this.approveInProgress = false;
+    this.saveInProgress = false;
+    this.headerUpdateInProgress = false;
+    this.footerUpdateInProgress = false;
+    this.documentMetadata = null;
+    this.documentVersionData = [];
+    this.exceedsDraftDocumentHeight = false;
+
+    this.structuredDraftDocument = {
+      header: null,
+      footer: null,
+      every_page_components: [],
+      pages: [this._newPage()],
+      document_template_type: null,
+      document_template_styles: null,
+      background_image: null,
+    };
+
+    this.relativeComponents = this.structuredDraftDocument.pages[0].components;
+    this.floatingComponents = this.structuredDraftDocument.pages[0].floating_components;
+    this.everyPageComponents = this.structuredDraftDocument.every_page_components;
+
+    this.bindActions(DraftDocumentActions);
+  }
+
+  onUpdateDocumentHeader(documentHeader) {
+    this.headerUpdateInProgress = false;
+    GenerateUuidHelper.addUuidIfNotPresent(documentHeader);
+    GenerateUuidHelper.generateUniqueComponentIdentifierForChildren(documentHeader);
+    this.structuredDraftDocument.header = documentHeader;
+  }
+
+  onUpdateDocumentFooter(documentFooter) {
+    this.footerUpdateInProgress = false;
+    GenerateUuidHelper.addUuidIfNotPresent(documentFooter);
+    GenerateUuidHelper.generateUniqueComponentIdentifierForChildren(documentFooter);
+    this.structuredDraftDocument.footer = documentFooter;
+  }
+
+  onApplyOrganizationSettingTemplateStyles(documentTemplateStyles) {
+    this.structuredDraftDocument.document_template_styles = documentTemplateStyles;
+  }
+
+  onApplyBackgroundImage(backgroundImage) {
+    this.structuredDraftDocument.background_image = backgroundImage;
+  }
+
+  onFetchDocumentHeader() {
+    this.headerUpdateInProgress = true;
+    this.structuredDraftDocument.header = null;
+  }
+
+  onFetchDocumentFooter() {
+    this.footerUpdateInProgress = true;
+    this.structuredDraftDocument.footer = null;
+  }
+
+  onUpdateDraftDocumentHeight(newHeight) {
+    this.exceedsDraftDocumentHeight = newHeight > MAX_DRAFT_DOCUMENT_HEIGHT;
+  }
+
+  onSetDocumentMetadata(documentMetadata) {
+    this.documentMetadata = documentMetadata;
+  }
+
+  onSetDocumentVersionData(documentVersionData) {
+    this.documentVersionData = documentVersionData;
+  }
+
+  onApproveDocument() {
+    this.structuredDraftDocument.document_template_type = OrganizationSettingStore.getState().organizationSetting.document_template_name;
+    this.approveInProgress = true;
+  }
+
+  onApproveDocumentComplete(documentVersion) {
+    this.approveInProgress = false;
+
+    if (documentVersion) {
+      this.documentVersionData.push(documentVersion);
+    }
+  }
+
+  onSaveDocument() {
+    this.structuredDraftDocument.document_template_type = OrganizationSettingStore.getState().organizationSetting.document_template_name;
+    this.saveInProgress = true;
+  }
+
+  onSaveDocumentComplete() {
+    this.saveInProgress = false;
+  }
+
+  onLoadDocumentContent(documentContent) {
+    this._initializeDraftDocumentContent(documentContent);
+    this._generateStylesheet();
+  }
+
+  onAddModule({ module, destinationComponent, dropLocation }) {
+    const moduleCopy = _.cloneDeep(module);  // Need to make a deep copy of the module in order to assign uuids
+    this._insertModule(moduleCopy, destinationComponent.componentUuid, dropLocation);
+  }
+
+  onAddTextComponent({ textComponent, destinationComponent, dropLocation }) {
+    const textComponentCopy = _.cloneDeep(textComponent);
+
+    GenerateUuidHelper.addUuidIfNotPresent(textComponentCopy);
+
+    this._insertTextComponent(textComponentCopy, destinationComponent.componentUuid, dropLocation);
+  }
+
+  onMoveTextComponent({ textComponent, destinationComponent, dropLocation }) {
+    const uniqueElement = this._findComponentElement(textComponent.componentUuid, this.relativeComponents);
+
+    uniqueElement.componentList.splice(uniqueElement.index, 1);
+
+    const textComponentCopy = _.cloneDeep(textComponent);
+
+    GenerateUuidHelper.addUuidIfNotPresent(textComponentCopy);
+
+    this._insertTextComponent(textComponentCopy, destinationComponent.componentUuid, dropLocation);
+  }
+
+  onAddModuleToEndOfList(module) {
+    this._generateAssignUuidAndClearSelectedComponent(module);
+    this.relativeComponents.push(module);
+  }
+
+  onMoveModule({ module, destinationComponent, dropLocation }) {
+    const uniqueElement = this._findComponentElement(module.componentUuid, this.relativeComponents);
+
+    if (module.componentUuid === destinationComponent.componentUuid || this._findComponentElement(destinationComponent.componentUuid, uniqueElement.component.content_blocks)) {
+      return; // Don't do anything if dropped over the same target
+    }
+
+    uniqueElement.componentList.splice(uniqueElement.index, 1);
+    this._insertModule(module, destinationComponent.componentUuid, dropLocation);
+  }
+
+  onAddFormComponent({ formComponent, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+
+    const formComponentCopy = _.cloneDeep(formComponent);
+    this._insertFormComponent(formComponentCopy, destinationComponent, dropLocation);
+  }
+
+  onMoveFormComponent({ formComponent, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+    if (this._spliceOutComponent(formComponent, destinationComponent)) {
+      const formComponentCopy = _.cloneDeep(formComponent);
+
+      this._insertFormComponent(formComponentCopy, destinationComponent, dropLocation);
+    }
+  }
+
+  onAddVerticalSpacer({ verticalSpacer, destinationComponent, dropLocation }) {
+    const spacerCopy = _.cloneDeep(verticalSpacer);
+    this._insertSpacer(spacerCopy, destinationComponent, dropLocation);
+  }
+
+  onAddVerticalSpacerToContentBlock({ verticalSpacer, destinationComponent, dropLocation }) {
+    const spacerCopy = _.cloneDeep(verticalSpacer);
+    this._insertComponentIntoContentBlock(spacerCopy, destinationComponent, dropLocation);
+  }
+
+  onMoveVerticalSpacer({ verticalSpacer, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+    if (this._spliceOutComponent(verticalSpacer, destinationComponent)) {
+      const spacerCopy = _.cloneDeep(verticalSpacer);
+      this._insertSpacer(spacerCopy, destinationComponent, dropLocation);
+    }
+  }
+
+  onMoveVerticalSpacerToContentBlock({ verticalSpacer, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+    if (this._spliceOutComponent(verticalSpacer, destinationComponent)) {
+      const spacerCopy = _.cloneDeep(verticalSpacer);
+
+      this._insertComponentIntoContentBlock(spacerCopy, destinationComponent, dropLocation);
+    }
+  }
+
+  onAddHorizontalSpacer({ horizontalSpacer, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+
+    const spacerCopy = _.cloneDeep(horizontalSpacer);
+    this._insertSpacer(spacerCopy, destinationComponent, dropLocation);
+  }
+
+  onMoveHorizontalSpacer({ horizontalSpacer, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+    if (this._spliceOutComponent(horizontalSpacer, destinationComponent)) {
+      const spacerCopy = _.cloneDeep(horizontalSpacer);
+
+      this._insertSpacer(spacerCopy, destinationComponent, dropLocation);
+    }
+  }
+
+  onAddFormComponentToContentBlock({ formComponent, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+
+    const formComponentCopy = _.cloneDeep(formComponent);
+
+    this._insertComponentIntoContentBlock(formComponentCopy, destinationComponent, dropLocation);
+  }
+
+  onMoveFormComponentToContentBlock({ formComponent, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+    if (this._spliceOutComponent(formComponent, destinationComponent)) {
+      const formComponentCopy = _.cloneDeep(formComponent);
+
+      this._insertComponentIntoContentBlock(formComponentCopy, destinationComponent, dropLocation);
+    }
+  }
+
+  onAddTextComponentToContentBlock({ textComponent, destinationComponent, dropLocation }) {
+    const textComponentCopy = _.cloneDeep(textComponent);
+
+    this._insertComponentIntoContentBlock(textComponentCopy, destinationComponent, dropLocation);
+  }
+
+  onMoveTextComponentToContentBlock({ textComponent, destinationComponent, dropLocation }) {
+    const uniqueElement = this._findComponentElement(textComponent.componentUuid, this.relativeComponents);
+
+    uniqueElement.componentList.splice(uniqueElement.index, 1);
+
+    const textComponentCopy = _.cloneDeep(textComponent);
+
+    this._insertComponentIntoContentBlock(textComponentCopy, destinationComponent, dropLocation);
+  }
+
+  onAddModuleComponentToContentBlock({ module, destinationComponent, dropLocation }) {
+    const moduleCopy = _.cloneDeep(module);
+
+    this._insertComponentIntoContentBlock(moduleCopy, destinationComponent, dropLocation);
+  }
+
+  onMoveFullModuleComponentToContentBlock({ module, destinationComponent, dropLocation }) {
+    if (this._spliceOutComponent(module, destinationComponent)) {
+      const moduleCopy = _.cloneDeep(module);
+
+      this._insertComponentIntoContentBlock(moduleCopy, destinationComponent, dropLocation);
+    }
+  }
+
+  onAddFormCompound({ formComponent, destinationComponent, dropLocation }) {
+    this.onAddFormComponent({ formComponent, destinationComponent, dropLocation });
+  }
+
+  onAddFormCompoundToContentBlock({ formComponent, destinationComponent, dropLocation }) {
+    this.onAddFormComponentToContentBlock({ formComponent, destinationComponent, dropLocation });
+  }
+
+  onAddRowElementToComponent({ rowElement, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+
+    const formComponent = this._createFormComponent(rowElement);
+
+    this._insertFormComponent(formComponent, destinationComponent, dropLocation);
+  }
+
+  onAddRowElementToContentBlock({ rowElement, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+
+    const formComponent = this._createFormComponent(rowElement);
+
+    this._insertComponentIntoContentBlock(formComponent, destinationComponent, dropLocation);
+  }
+
+  onAddRowElementToFieldRow({ rowElement, destinationComponent, dropLocation }) {
+    this.waitFor(OverElementStore);
+
+    if (dropLocation === DropTargetLocations.RIGHT) {
+      const rowElementCopy = _.cloneDeep(rowElement);
+      GenerateUuidHelper.addUuidIfNotPresent(rowElementCopy);
+
+      this._conditionallyAddGroupName(rowElementCopy);
+
+      const entireDocument = this._entireDraftDocument();
+
+      const element = this._findComponentElement(destinationComponent.componentUuid, entireDocument);
+      const fieldRowElement = this._findComponentElement(element.parentComponent.componentUuid, entireDocument);
+
+      this._addBelow(element.componentList, element.index, rowElementCopy);
+      this._generateAssignUuidAndClearSelectedComponent(fieldRowElement.parentComponent);
+    }
+  }
+
+  onAddFloatingElementToPage(element) {
+    const formComponent = this._createFormComponent(element);
+    formComponent.type = 'floating';
+
+    GenerateUuidHelper.addUuidIfNotPresent(formComponent);
+    GenerateUuidHelper.generateUniqueComponentIdentifierForChildren(formComponent);
+
+    this._clearSelectedComponent();
+    this.floatingComponents.push(formComponent);
+  }
+
+  onMoveFloatingElement({ element, formComponentUuid }) {
+    const uniqueElement = this._findComponentElement(formComponentUuid, this.floatingComponents);
+    uniqueElement.componentList.splice(uniqueElement.index, 1);
+    this._clearSelectedComponent();
+    this.onAddFloatingElementToPage(element);
+  }
+
+  onRemoveComponent(identifier) {
+    const entireDocument = this._entireDraftDocument();
+
+    const element = this._findComponentElement(identifier, entireDocument);
+    if (this._isSelectedComponentUnderElement(identifier, element)) {
+      this.selectedComponent = null;
+      this.currentEditingComponent = null;
+    }
+
+    if (element) {
+      element.componentList.splice(element.index, 1);
+
+      const parentComponent = element.parentComponent;
+      if (parentComponent.type === 'content_block' && this._checkIfContentBlockIsEmpty(parentComponent)) {
+        this.onRemoveComponent(parentComponent.componentUuid);
+      }
+    }
+  }
+
+  onSaveSelectedModuleComponent(component) {
+    this._saveSelectedComponent(component);
+  }
+
+  onSaveSelectedFormComponent(component) {
+    this._saveSelectedComponent(component);
+  }
+
+  onSaveSelectedFloatingComponent(component) {
+    const entireDocument = this._entireDraftDocument();
+
+    const element = this._findComponentElement(component.componentUuid, entireDocument);
+    if (element) {
+      element.componentList.splice(element.index, 1);
+    }
+
+    const applyTo = component.field_rows[0].row_elements[0].apply_to;
+
+    if (applyTo === applyToLocations.ALL_PAGES) {
+      this.everyPageComponents.push(component);
+    } else {
+      this.floatingComponents.push(component);
+    }
+
+    this.selectedComponent = component;
+    this.currentEditingComponent = _.cloneDeep(component);
+  }
+
+  onSaveSelectedBarcodeFormComponent({ component, barcode }) {
+    const rowElement = component.field_rows[0].row_elements[0];
+    rowElement.src = barcode;
+    this.onSaveSelectedFloatingComponent(component);
+  }
+
+  onAddNewPage() {
+    this.structuredDraftDocument.pages.push(this._newPage());
+  }
+
+  onDeleteCurrentPage() {
+    this.waitFor(PaginateStore);
+    const pageIndex = PaginateStore.getState().currentPage - 1;
+    this.structuredDraftDocument.pages = _.without(this.structuredDraftDocument.pages,
+      this.structuredDraftDocument.pages[pageIndex]);
+
+    if (pageIndex === 0) {
+      this.relativeComponents = this.structuredDraftDocument.pages[pageIndex].components;
+      this.floatingComponents = this.structuredDraftDocument.pages[pageIndex].floating_components;
+    } else {
+      this.floatingComponents = this.structuredDraftDocument.pages[pageIndex - 1].floating_components;
+      this.relativeComponents = this.structuredDraftDocument.pages[pageIndex - 1].components;
+    }
+  }
+
+  onSetCurrentPage() {
+    this.waitFor(PaginateStore);
+    const pageIndex = PaginateStore.getState().currentPage - 1;
+
+    this.relativeComponents = this.structuredDraftDocument.pages[pageIndex].components;
+    this.floatingComponents = this.structuredDraftDocument.pages[pageIndex].floating_components;
+
+    this.selectedComponent = null;
+    this.currentEditingComponent = null;
+  }
+
+  _insertModule = (module, overElementIdentifier, dropLocation) => {
+    GenerateUuidHelper.generateUuidForAll(module);
+    AssignParentCheckboxUuidHelper.assignParentUuid(module);
+
+    if (overElementIdentifier !== OVER_DOCUMENT_INDEX) {
+      const overElement = this._findComponentElement(overElementIdentifier, this.relativeComponents);
+      if (overElement) {
+        this._handleDropLocationFunction(this._insertModuleDropLocationMap(), dropLocation, overElement, module);
+        this._clearSelectedComponent(overElement);
+      }
+    } else {
+      this.relativeComponents.push(module);
+    }
+  };
+
+  _insertModuleDropLocationMap = () => (
+    {
+      [DropTargetLocations.BELOW]: this._dropModuleBelow,
+      [DropTargetLocations.ABOVE]: this._dropModuleAbove,
+      [DropTargetLocations.INTO]: this._dropModuleInto,
+    }
+  );
+
+  _dropModuleBelow = (overElement, module) => {
+    this._addBelow(overElement.componentList, overElement.index, module);
+  };
+
+  _dropModuleInto = (overElement, module) => {
+    overElement.component.content_blocks[0].module_components.push(module);
+  };
+
+  _dropModuleAbove = (overElement, module) => {
+    this._addAbove(overElement.componentList, overElement.index, module);
+  };
+
+  _insertSpacer = (spacer, destinationComponent, dropLocation) => {
+    const overElementIdentifier = destinationComponent.componentUuid;
+
+    GenerateUuidHelper.addUuidIfNotPresent(spacer);
+
+    if (overElementIdentifier !== OVER_DOCUMENT_INDEX) {
+      const overElement = this._findComponentElement(overElementIdentifier, this._entireDraftDocument());
+      if (overElement) {
+        // TODO: refactor so that spacer always comes before destinationComponent/overElement
+        if (spacer.type === ObjectTypes.VERTICAL_SPACER) {
+          this._handleDropLocationFunction(this._verticalSpacerDropLocationMap(), dropLocation, overElement, spacer);
+          this._clearSelectedComponent(overElement);
+        } else if (spacer.type === ObjectTypes.HORIZONTAL_SPACER) {
+          this._handleDropLocationFunction(this._horizontalSpacerDropLocationMap(), dropLocation, spacer, destinationComponent);
+          this._clearSelectedComponent(overElement);
+        }
+      }
+    } else {
+      this.relativeComponents.push(spacer);
+    }
+  };
+
+  _verticalSpacerDropLocationMap = () => (
+    {
+      [DropTargetLocations.BELOW]: this._dropModuleBelow,
+      [DropTargetLocations.ABOVE]: this._dropModuleAbove,
+      [DropTargetLocations.INTO]: this._dropSpacerInto,
+    }
+  );
+
+  _dropSpacerInto = (overElement, spacer) => {
+    const contentBlock = this._createContentBlock(spacer);
+    GenerateUuidHelper.addUuidIfNotPresent(contentBlock);
+    overElement.component.content_blocks.push(contentBlock);
+  }
+
+  _horizontalSpacerDropLocationMap = () => (
+    {
+      [DropTargetLocations.LEFT]: this._dropToTheLeftOfFormComponent,
+      [DropTargetLocations.RIGHT]: this._dropToTheRightOfFormComponent,
+    }
+  );
+
+  _insertFormComponent = (formComponent, destinationComponent, dropLocation) => {
+    this._handleDropLocationFunction(this._insertFormComponentDropLocationMap(), dropLocation, formComponent, destinationComponent);
+  };
+
+  _insertFormComponentDropLocationMap = () => (
+    {
+      [DropTargetLocations.LEFT]: this._dropToTheLeftOfFormComponent,
+      [DropTargetLocations.INTO]: this._dropIntoComponent,
+      [DropTargetLocations.RIGHT]: this._dropToTheRightOfFormComponent,
+    }
+  );
+
+  _dropToTheLeftOfFormComponent = (formComponent, destinationComponent) => {
+    const element = this._findComponentElement(destinationComponent.componentUuid, this._entireDraftDocument());
+    this._generateAssignUuidAndClearSelectedComponent(formComponent);
+    this._addAbove(element.componentList, element.index, formComponent);
+  };
+
+  _dropToTheRightOfFormComponent = (formComponent, destinationComponent) => {
+    const element = this._findComponentElement(destinationComponent.componentUuid, this._entireDraftDocument());
+    this._generateAssignUuidAndClearSelectedComponent(formComponent);
+    this._addBelow(element.componentList, element.index, formComponent);
+  };
+
+  _dropIntoComponent = (formComponent, destinationComponent) => {
+    if (destinationComponent.type === ObjectTypes.FORM) {
+      this._addSharedKeyToChildFormComponent(formComponent, destinationComponent);
+    }
+
+    if (destinationComponent.content_blocks.length === 1 && this._checkIfContentBlockIsEmpty(destinationComponent.content_blocks[0])) {
+      const formComponentCopy = _.cloneDeep(formComponent);
+      this._generateAssignUuidAndClearSelectedComponent(formComponentCopy);
+      this._pushToCollection(destinationComponent.content_blocks[0], formComponentCopy);
+    } else {
+      const contentBlock = this._createContentBlock(formComponent);
+      this._generateAssignUuidAndClearSelectedComponent(contentBlock);
+      destinationComponent.content_blocks.push(contentBlock);
+    }
+  };
+
+  _insertComponentIntoContentBlock = (component, destinationComponent, dropLocation) => {
+    this._handleDropLocationFunction(this._insertComponentIntoContentBlockDropLocationMap(), dropLocation, component, destinationComponent);
+  };
+
+  _insertComponentIntoContentBlockDropLocationMap = () => (
+    {
+      [DropTargetLocations.BELOW]: this._dropComponentBelowContentBlock,
+      [DropTargetLocations.ABOVE]: this._dropComponentAboveContentBlock,
+      [DropTargetLocations.INTO]: this._dropComponentIntoContentBlock,
+    }
+  );
+
+  _dropComponentBelowContentBlock = (component, destinationComponent) => {
+    const contentBlock = this._createContentBlock(component);
+    const element = this._findComponentElement(destinationComponent.componentUuid, this._entireDraftDocument());
+
+    this._generateAssignUuidAndClearSelectedComponent(contentBlock);
+    this._addBelow(element.componentList, element.index, contentBlock);
+  };
+
+  _dropComponentAboveContentBlock = (component, destinationComponent) => {
+    const contentBlock = this._createContentBlock(component);
+    const element = this._findComponentElement(destinationComponent.componentUuid, this._entireDraftDocument());
+
+    this._generateAssignUuidAndClearSelectedComponent(contentBlock);
+    this._addAbove(element.componentList, element.index, contentBlock);
+  };
+
+  _dropComponentIntoContentBlock = (component, destinationComponent) => {
+    this._generateAssignUuidAndClearSelectedComponent(component);
+    this._pushToCollection(destinationComponent, component);
+  };
+
+  _handleDropLocationFunction = (dropLocationFunctionMap, dropLocation, component, destinationComponent) => {
+    const locationFunc = dropLocationFunctionMap[dropLocation];
+
+    if (locationFunc !== undefined || locationFunc !== null) {
+      // TODO: Update to accept an object
+      locationFunc(component, destinationComponent);
+    } else {
+      console.log(`Invalid Drop Location ${dropLocation}`);  // eslint-disable-line no-console
+    }
+  };
+
+  _pushToCollection = (destination, component) => {
+    const collectionName = this._collectionNameMapper(component.type);
+    const collection = destination[collectionName];
+    if (collection !== undefined || collection !== null) {
+      collection.push(component);
+    }
+  };
+
+  _collectionNameMapper = (componentType) => {
+    switch (componentType) {
+      case ObjectTypes.VERTICAL_SPACER:
+        return 'form_components';
+      default:
+        return `${componentType}_components`;
+    }
+  };
+
+  _addAbove = (list, newIndex, component) => {
+    list.splice(newIndex, 0, component);
+  };
+
+  _addBelow = (list, newIndex, component) => {
+    list.splice(newIndex + 1, 0, component);
+  };
+
+  _insertTextComponent = (textComponent, overElementIdentifier, dropLocation) => {
+    if (overElementIdentifier !== OVER_DOCUMENT_INDEX) {
+      const overElement = this._findComponentElement(overElementIdentifier, this.relativeComponents);
+      if (overElement) {
+        this._clearSelectedComponent(overElement);
+        this._handleDropLocationFunction(this._insertTextComponentDropLocationMap(), dropLocation, overElement, textComponent);
+      }
+    } else {
+      this.relativeComponents.push(textComponent);
+    }
+  };
+
+  _insertTextComponentDropLocationMap = () => (
+    {
+      [DropTargetLocations.BELOW]: this._dropTextComponentBelow,
+      [DropTargetLocations.ABOVE]: this._dropTextComponentAbove,
+      [DropTargetLocations.INTO]: this._dropTextComponentInto,
+    }
+  );
+
+  _dropTextComponentBelow = (overElement, textComponent) => {
+    this._addBelow(overElement.componentList, overElement.index, textComponent);
+  };
+
+  _dropTextComponentAbove = (overElement, textComponent) => {
+    this._addAbove(overElement.componentList, overElement.index, textComponent);
+  };
+
+  _dropTextComponentInto = (overElement, textComponent) => {
+    overElement.component.content_blocks[0].text_components.push(textComponent);
+  };
+
+  _findComponentElement = (uniqueIdentifier, componentList, parentComponent = this._entireDraftDocument()) => {
+    let foundChildComponent = false;
+    let component;
+    for (let i = 0; i < componentList.length; i++) {
+      component = componentList[i];
+      if (component.componentUuid === uniqueIdentifier) {
+        // Return the component, where it is, and it's index to help with splicing it in/out
+        return { component, componentList, index: i, parentComponent };
+      }
+
+      foundChildComponent = this._findInChildComponents(uniqueIdentifier, component.module_components, component);
+      if (!foundChildComponent) {
+        foundChildComponent = this._findInChildComponents(uniqueIdentifier, component.content_blocks, component);
+        if (!foundChildComponent) {
+          foundChildComponent = this._findInChildComponents(uniqueIdentifier, component.form_components, component);
+          if (!foundChildComponent) {
+            foundChildComponent = this._findInChildComponents(uniqueIdentifier, component.text_components, component);
+            if (!foundChildComponent) {
+              foundChildComponent = this._findInChildComponents(uniqueIdentifier, component.field_rows, component);
+              if (!foundChildComponent) {
+                foundChildComponent = this._findInChildComponents(uniqueIdentifier, component.row_elements, component);
+              }
+            }
+          }
+        }
+      }
+      if (foundChildComponent) {
+        return foundChildComponent;
+      }
+    }
+    return false;
+  };
+
+  _findInChildComponents = (uniqueIdentifier, childComponentList, parentComponent) => {
+    if (childComponentList && childComponentList.length > 0) {
+      const foundChildComponent = this._findComponentElement(uniqueIdentifier, childComponentList, parentComponent);
+      if (foundChildComponent) {
+        return foundChildComponent;
+      }
+    }
+    return false;
+  };
+
+  _initializeDraftDocumentContent = (documentContent) => {
+    this.structuredDraftDocument.footer = null;
+    this.structuredDraftDocument.header = null;
+    this.structuredDraftDocument = documentContent;
+    this.structuredDraftDocument.every_page_components = this.structuredDraftDocument.every_page_components || [];
+    if (documentContent.pages.length === 0) {
+      this.structuredDraftDocument.pages.push(this._newPage());
+    } else {
+      this._generateUuidsForDocument();
+    }
+    this.relativeComponents = this.structuredDraftDocument.pages[0].components;
+    this.floatingComponents = this.structuredDraftDocument.pages[0].floating_components;
+    this.everyPageComponents = this.structuredDraftDocument.every_page_components;
+  };
+
+  _generateStylesheet = () => {
+    this.waitFor(OrganizationSettingStore);
+    const orgSetting = OrganizationSettingStore.getState().organizationSetting;
+    const stylesheetGenerator = new CustomStylesheetGenerator(orgSetting);
+    stylesheetGenerator.call();
+  };
+
+  _updateComponent = (component) => {
+    const entireDocument = this._entireDraftDocument();
+
+    const element = this._findComponentElement(component.componentUuid, entireDocument);
+    if (element) {
+      element.componentList.splice(element.index, 1, component);
+    }
+  };
+
+  _spliceOutComponent = (sourceComponent, destinationComponent) => {
+    const element = this._findComponentElement(sourceComponent.componentUuid, this._entireDraftDocument());
+
+    if (sourceComponent.componentUuid === destinationComponent.componentUuid || this._findComponentElement(destinationComponent.componentUuid, element.component.content_blocks)) {
+      return false; // Don't do anything if dropped over the same target
+    }
+
+    if (this._isSelectedComponentUnderElement(sourceComponent.componentUuid, element)) {
+      this.selectedComponent = null;
+      this.currentEditingComponent = null;
+    }
+
+    if (element) {
+      element.componentList.splice(element.index, 1);
+    }
+    return true;
+  };
+
+  _isSelectedComponentUnderElement = (identifier, element) => (
+    (this.selectedComponent && (identifier === this.selectedComponent.componentUuid || this._findComponentElement(this.selectedComponent.componentUuid, [element.component])))
+  );
+
+  _isElementUnderSelectedComponent = (element) => (
+    (this.selectedComponent && (element.component.componentUuid === this.selectedComponent.componentUuid || this._findComponentElement(element.component.componentUuid, [this.selectedComponent])))
+  );
+
+  _addSharedKeyToChildFormComponent = (childComponent, parentComponent) => {
+    const parentRowElementId = parentComponent.field_rows[0].row_elements[0].componentUuid;
+    childComponent.field_rows[0].row_elements[0].parent_id = parentRowElementId; // eslint-disable-line no-param-reassign
+  };
+
+  _generateUuidsForDocument = () => {
+    this.structuredDraftDocument.pages.map((page) => {  // eslint-disable-line array-callback-return
+      page.components.map((component) => {  // eslint-disable-line array-callback-return
+        GenerateUuidHelper.generateUuidForAll(component);
+      });
+    });
+  };
+
+  _checkIfContentBlockIsEmpty = (contentBlock) => {
+    const moduleComponents = contentBlock.module_components || [];
+    const formComponents = contentBlock.form_components || [];
+    const textComponents = contentBlock.text_components || [];
+    const children = moduleComponents.concat(formComponents).concat(textComponents);
+
+    return children.length === 0;
+  };
+
+  _createFormComponent = (rowElement) => {
+    const rowElementCopy = _.cloneDeep(rowElement);
+    rowElementCopy.field_row_id = 'fr1';
+    this._conditionallyAddGroupName(rowElementCopy);
+    const fieldRow = { id: 'fr1', row_elements: [rowElementCopy] };
+    fieldRow.form_component_id = 'fc1';
+    return {
+      id: 'fc1',
+      text_representation: 'form',
+      type: 'form',
+      content_blocks: [],
+      field_rows: [fieldRow],
+    };
+  };
+
+  _createContentBlock = (component) => {
+    const contentBlock = {
+      type: 'content_block',
+      unique_component_identifier: 'content_block',
+      form_components: [],
+      module_components: [],
+      text_components: [],
+    };
+
+    this._pushToCollection(contentBlock, component);
+    return contentBlock;
+  };
+
+  _entireDraftDocument = () => {
+    const entireDocument = [];
+    const header = this.structuredDraftDocument.header;
+    const footer = this.structuredDraftDocument.footer;
+
+    if (header) {
+      entireDocument.push(header);
+    }
+    entireDocument.push({ module_components: this.relativeComponents });
+    entireDocument.push({ module_components: this.floatingComponents });
+    entireDocument.push({ module_components: this.everyPageComponents });
+    if (footer) {
+      entireDocument.push(footer);
+    }
+
+    return entireDocument;
+  };
+
+  _newPage = () => (
+    {
+      components: [],
+      floating_components: [],
+    }
+  );
+
+  _conditionallyAddGroupName = (component) => {
+    if (component.group_name === undefined || component.group_name === null) {
+      if (component.value === rowElementTypes.RADIO_BUTTON) {
+        component.group_name = Uuid.uuid();  // eslint-disable-line no-param-reassign
+      }
+    }
+  };
+
+  _saveSelectedComponent = (component) => {
+    this._updateComponent(component);
+    this.selectedComponent = component;
+    this.currentEditingComponent = _.cloneDeep(component);
+  };
+
+  _clearSelectedComponent = (element = null) => {
+    if (element === null || this._isElementUnderSelectedComponent(element)) {
+      this.selectedComponent = null;
+      this.currentEditingComponent = null;
+    }
+  };
+
+  _generateAssignUuidAndClearSelectedComponent = (component) => {
+    GenerateUuidHelper.generateUuidForAll(component);
+    AssignParentCheckboxUuidHelper.assignParentUuid(component);
+    this._clearSelectedComponent();
+  }
+}
+
+module.exports = alt.createStore(DraftDocumentStore, 'DraftDocumentStore');
