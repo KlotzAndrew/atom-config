@@ -1,4 +1,7 @@
 "*":
+  "atom-pair":
+    pusher_app_key: "2e96d457dfdca7cca81f"
+    pusher_app_secret: "c2af00915d465930f289"
   core:
     disabledPackages: [
       "about"
@@ -9,12 +12,16 @@
       "solarized-dark-syntax"
     ]
   editor:
-    fontSize: 11
+    fontSize: 10
     showIndentGuide: true
     showInvisibles: true
   "exception-reporting":
     userId: "9a418efc-cf69-5e15-d7f7-fa5984c6bef2"
   "git-diff": {}
+  linter:
+    inlineTooltipInterval: 1000
+    lintOnFlyInterval: 2500
+    showErrorTabLine: true
   "linter-elixir-credo":
     flags: "--strict"
   "linter-rubocop":
